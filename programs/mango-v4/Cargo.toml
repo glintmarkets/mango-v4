@@ -37,7 +37,7 @@ fixed = { workspace = true, features = [
     "borsh",
     "debug-assert-in-release",
 ] }
-num_enum = "0.5.1"
+num_enum = "0.5.9"
 pyth-sdk-solana = { workspace = true }
 serde = "^1.0"
 serum_dex = { workspace = true, features = ["no-entrypoint", "program"] }
