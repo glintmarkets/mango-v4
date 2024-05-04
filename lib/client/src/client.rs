@@ -23,8 +23,8 @@ use mango_v4::accounts_ix::{
 use mango_v4::accounts_zerocopy::KeyedAccountSharedData;
 use mango_v4::health::HealthCache;
 use mango_v4::state::{
-    Bank, Group, MangoAccountValue, OracleAccountInfos, PerpMarket, PerpMarketIndex,
-    PlaceOrderType, SelfTradeBehavior, Serum3MarketIndex, Side, TokenIndex, INSURANCE_TOKEN_INDEX,
+    Bank, Group, MangoAccountValue, OpenbookV2MarketIndex, OracleAccountInfos, PerpMarket,
+    PerpMarketIndex, PlaceOrderType, SelfTradeBehavior, Serum3MarketIndex, Side, TokenIndex,
 };
 
 use crate::confirm_transaction::{wait_for_transaction_confirmation, RpcConfirmTransactionConfig};
@@ -273,7 +273,7 @@ pub struct MangoClient {
     // call to refresh banks etc -- if it's backed by websockets, these could just do nothing
     pub account_fetcher: Arc<dyn AccountFetcher>,
 
-    pub owner: Arc<Keypair>,
+    pub authority: Arc<Keypair>,
     pub mango_account_address: Pubkey,
 
     pub context: MangoGroupContext,
@@ -406,7 +406,7 @@ impl MangoClient {
     pub async fn new_for_existing_account(
         client: Client,
         account: Pubkey,
-        owner: Arc<Keypair>,
+        authority: Arc<Keypair>,
     ) -> anyhow::Result<Self> {
         let rpc = client.new_rpc_async();
         let account_fetcher = Arc::new(CachedAccountFetcher::new(Arc::new(RpcAccountFetcher {
@@ -415,25 +415,25 @@ impl MangoClient {
         let mango_account =
             account_fetcher_fetch_mango_account(&*account_fetcher, &account).await?;
         let group = mango_account.fixed.group;
-        if mango_account.fixed.owner != owner.pubkey() {
+        if mango_account.fixed.owner != authority.pubkey() {
             anyhow::bail!(
                 "bad owner for account: expected {} got {}",
                 mango_account.fixed.owner,
-                owner.pubkey()
+                authority.pubkey()
             );
         }
 
         let rpc = client.rpc_async();
         let group_context = MangoGroupContext::new_from_rpc(&rpc, group).await?;
 
-        Self::new_detail(client, account, owner, group_context, account_fetcher)
+        Self::new_detail(client, account, authority, group_context, account_fetcher)
     }
 
     /// Allows control of AccountFetcher and externally created MangoGroupContext
     pub fn new_detail(
         client: Client,
         account: Pubkey,
-        owner: Arc<Keypair>,
+        authority: Arc<Keypair>,
         // future: maybe pass Arc<MangoGroupContext>, so it can be extenally updated?
         group_context: MangoGroupContext,
         account_fetcher: Arc<dyn AccountFetcher>,
@@ -441,15 +441,15 @@ impl MangoClient {
         Ok(Self {
             client,
             account_fetcher,
-            owner,
+            authority,
             mango_account_address: account,
             context: group_context,
             http_client: reqwest::Client::new(),
         })
     }
 
-    pub fn owner(&self) -> Pubkey {
-        self.owner.pubkey()
+    pub fn authority(&self) -> Pubkey {
+        self.authority.pubkey()
     }
 
     pub fn group(&self) -> Pubkey {
@@ -554,12 +554,15 @@ impl MangoClient {
                         &mango_v4::accounts::TokenDeposit {
                             group: self.group(),
                             account: self.mango_account_address,
-                            owner: self.owner(),
+                            owner: self.authority(),
                             bank: token.first_bank(),
                             vault: token.first_vault(),
                             oracle: token.oracle,
-                            token_account: get_associated_token_address(&self.owner(), &token.mint),
-                            token_authority: self.owner(),
+                            token_account: get_associated_token_address(
+                                &self.authority(),
+                                &token.mint,
+                            ),
+                            token_authority: self.authority(),
                             token_program: Token::id(),
                         },
                         None,
@@ -574,7 +577,8 @@ impl MangoClient {
             },
             self.instruction_cu(health_cu),
         );
-        self.send_and_confirm_owner_tx(ixs.to_instructions()).await
+        self.send_and_confirm_authority_tx(ixs.to_instructions())
+            .await
     }
 
     /// Assert that health of account is > N
@@ -667,8 +671,8 @@ impl MangoClient {
         let ixs = PreparedInstructions::from_vec(
             vec![
                 spl_associated_token_account::instruction::create_associated_token_account_idempotent(
-                    &self.owner(),
-                    &self.owner(),
+                    &self.authority(),
+                    &account.fixed.owner,
                     &mint,
                     &Token::id(),
                 ),
@@ -679,12 +683,12 @@ impl MangoClient {
                             &mango_v4::accounts::TokenWithdraw {
                                 group: self.group(),
                                 account: self.mango_account_address,
-                                owner: self.owner(),
+                                owner: self.authority(),
                                 bank: token.first_bank(),
                                 vault: token.first_vault(),
                                 oracle: token.oracle,
                                 token_account: get_associated_token_address(
-                                    &self.owner(),
+                                    &account.fixed.owner,
                                     &token.mint,
                                 ),
                                 token_program: Token::id(),
@@ -715,7 +719,8 @@ impl MangoClient {
         let ixs = self
             .token_withdraw_instructions(&account, mint, amount, allow_borrow)
             .await?;
-        self.send_and_confirm_owner_tx(ixs.to_instructions()).await
+        self.send_and_confirm_authority_tx(ixs.to_instructions())
+            .await
     }
 
     pub async fn bank_oracle_price(&self, token_index: TokenIndex) -> anyhow::Result<I80F48> {
@@ -767,8 +772,8 @@ impl MangoClient {
                         serum_program: s3.serum_program,
                         serum_market_external: s3.serum_market_external,
                         open_orders,
-                        owner: self.owner(),
-                        sol_destination: self.owner(),
+                        owner: self.authority(),
+                        sol_destination: self.authority(),
                     },
                     None,
                 ),
@@ -783,7 +788,8 @@ impl MangoClient {
     pub async fn serum3_close_open_orders(&self, name: &str) -> anyhow::Result<Signature> {
         let market_index = self.context.serum3_market_index(name);
         let ix = self.serum3_close_open_orders_instruction(market_index);
-        self.send_and_confirm_owner_tx(ix.to_instructions()).await
+        self.send_and_confirm_authority_tx(ix.to_instructions())
+            .await
     }
 
     pub fn serum3_create_open_orders_instruction(
@@ -805,8 +811,8 @@ impl MangoClient {
                     serum_program: s3.serum_program,
                     serum_market_external: s3.serum_market_external,
                     open_orders,
-                    owner: self.owner(),
-                    payer: self.owner(),
+                    owner: self.authority(),
+                    payer: self.authority(),
                     system_program: System::id(),
                     rent: sysvar::rent::id(),
                 },
@@ -838,7 +844,7 @@ impl MangoClient {
     pub async fn serum3_create_open_orders(&self, name: &str) -> anyhow::Result<Signature> {
         let market_index = self.context.serum3_market_index(name);
         let ix = self.serum3_create_open_orders_instruction(market_index);
-        self.send_and_confirm_owner_tx(vec![ix]).await
+        self.send_and_confirm_authority_tx(vec![ix]).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -896,7 +902,7 @@ impl MangoClient {
                             market_base_vault: s3.coin_vault,
                             market_quote_vault: s3.pc_vault,
                             market_vault_signer: s3.vault_signer,
-                            owner: self.owner(),
+                            owner: self.authority(),
                             token_program: Token::id(),
                         },
                         None,
@@ -1159,7 +1165,8 @@ impl MangoClient {
         let mut ixs = PreparedInstructions::new();
         ixs.append(create_or_replace_ixs);
         ixs.append(place_order_ixs);
-        self.send_and_confirm_owner_tx(ixs.to_instructions()).await
+        self.send_and_confirm_authority_tx(ixs.to_instructions())
+            .await
     }
 
     pub async fn serum3_settle_funds(&self, name: &str) -> anyhow::Result<Signature> {
@@ -1172,7 +1179,8 @@ impl MangoClient {
         let open_orders = account.serum3_orders(market_index).unwrap().open_orders;
 
         let ix = self.serum3_settle_funds_instruction(s3, base, quote, open_orders);
-        self.send_and_confirm_owner_tx(ix.to_instructions()).await
+        self.send_and_confirm_authority_tx(ix.to_instructions())
+            .await
     }
 
     pub fn serum3_settle_funds_instruction(
@@ -1200,7 +1208,7 @@ impl MangoClient {
                         market_base_vault: s3.coin_vault,
                         market_quote_vault: s3.pc_vault,
                         market_vault_signer: s3.vault_signer,
-                        owner: self.owner(),
+                        owner: self.authority(),
                         token_program: Token::id(),
                     },
                     v2: mango_v4::accounts::Serum3SettleFundsV2Extra {
@@ -1244,7 +1252,7 @@ impl MangoClient {
                         serum_market: s3.address,
                         serum_program: s3.serum_program,
                         serum_market_external: s3.serum_market_external,
-                        owner: self.owner(),
+                        owner: self.authority(),
                     },
                     None,
                 ),
@@ -1344,6 +1352,62 @@ impl MangoClient {
         Ok(ix)
     }
 
+    pub async fn openbook_v2_liq_force_cancel_orders_instruction(
+        &self,
+        liqee: (&Pubkey, &MangoAccountValue),
+        market_index: OpenbookV2MarketIndex,
+        open_orders: &Pubkey,
+    ) -> anyhow::Result<PreparedInstructions> {
+        let openbook_v2_market = self.context.openbook_v2(market_index);
+        let base = self.context.token(openbook_v2_market.base_token_index);
+        let quote = self.context.token(openbook_v2_market.quote_token_index);
+        let (health_remaining_ams, health_cu) = self
+            .derive_health_check_remaining_account_metas(liqee.1, vec![], vec![], vec![])
+            .await
+            .unwrap();
+
+        let limit = 5;
+        let ix = PreparedInstructions::from_single(
+            Instruction {
+                program_id: mango_v4::id(),
+                accounts: {
+                    let mut ams = anchor_lang::ToAccountMetas::to_account_metas(
+                        &mango_v4::accounts::OpenbookV2LiqForceCancelOrders {
+                            payer: self.authority(),
+                            group: self.group(),
+                            account: *liqee.0,
+                            open_orders: *open_orders,
+                            openbook_v2_market: openbook_v2_market.address,
+                            openbook_v2_program: openbook_v2_market.openbook_v2_program,
+                            openbook_v2_market_external: openbook_v2_market.market_external,
+                            bids: openbook_v2_market.bids,
+                            asks: openbook_v2_market.asks,
+                            event_heap: openbook_v2_market.event_heap,
+                            market_base_vault: openbook_v2_market.market_base_vault,
+                            market_quote_vault: openbook_v2_market.market_quote_vault,
+                            market_vault_signer: openbook_v2_market.market_authority,
+                            quote_bank: quote.first_bank(),
+                            quote_vault: quote.first_vault(),
+                            base_bank: base.first_bank(),
+                            base_vault: base.first_vault(),
+                            token_program: Token::id(),
+                            system_program: System::id(),
+                        },
+                        None,
+                    );
+                    ams.extend(health_remaining_ams.into_iter());
+                    ams
+                },
+                data: anchor_lang::InstructionData::data(
+                    &mango_v4::instruction::OpenbookV2LiqForceCancelOrders { limit },
+                ),
+            },
+            self.instruction_cu(health_cu)
+                + self.context.compute_estimates.cu_per_serum3_order_cancel * limit as u32,
+        );
+        Ok(ix)
+    }
+
     pub async fn serum3_liq_force_cancel_orders(
         &self,
         liqee: (&Pubkey, &MangoAccountValue),
@@ -1383,7 +1447,7 @@ impl MangoClient {
                         market_bids: s3.bids,
                         market_asks: s3.asks,
                         market_event_queue: s3.event_q,
-                        owner: self.owner(),
+                        owner: self.authority(),
                     },
                     None,
                 )
@@ -1393,7 +1457,7 @@ impl MangoClient {
                 order_id,
             }),
         };
-        self.send_and_confirm_owner_tx(vec![ix]).await
+        self.send_and_confirm_authority_tx(vec![ix]).await
     }
 
     //
@@ -1446,7 +1510,7 @@ impl MangoClient {
                     &mango_v4::accounts::PerpPlaceOrder {
                         group: self.group(),
                         account: self.mango_account_address,
-                        owner: self.owner(),
+                        owner: self.authority(),
                         perp_market: perp.address,
                         bids: perp.bids,
                         asks: perp.asks,
@@ -1551,7 +1615,8 @@ impl MangoClient {
                 self_trade_behavior,
             )
             .await?;
-        self.send_and_confirm_owner_tx(ixs.to_instructions()).await
+        self.send_and_confirm_authority_tx(ixs.to_instructions())
+            .await
     }
 
     pub fn perp_cancel_all_orders_instruction(
@@ -1569,7 +1634,7 @@ impl MangoClient {
                         &mango_v4::accounts::PerpCancelAllOrders {
                             group: self.group(),
                             account: self.mango_account_address,
-                            owner: self.owner(),
+                            owner: self.authority(),
                             perp_market: perp.address,
                             bids: perp.bids,
                             asks: perp.asks,
@@ -1594,7 +1659,8 @@ impl MangoClient {
         let ixs = self
             .perp_deactivate_position_instruction(market_index)
             .await?;
-        self.send_and_confirm_owner_tx(ixs.to_instructions()).await
+        self.send_and_confirm_authority_tx(ixs.to_instructions())
+            .await
     }
 
     async fn perp_deactivate_position_instruction(
@@ -1611,7 +1677,7 @@ impl MangoClient {
                         &mango_v4::accounts::PerpDeactivatePosition {
                             group: self.group(),
                             account: self.mango_account_address,
-                            owner: self.owner(),
+                            owner: self.authority(),
                             perp_market: perp.address,
                         },
                         None,
@@ -1654,7 +1720,7 @@ impl MangoClient {
                         &mango_v4::accounts::PerpSettlePnl {
                             group: self.group(),
                             settler: self.mango_account_address,
-                            settler_owner: self.owner(),
+                            settler_owner: self.authority(),
                             perp_market: perp.address,
                             account_a: *account_a.0,
                             account_b: *account_b.0,
@@ -1758,7 +1824,7 @@ impl MangoClient {
                         perp_market: perp.address,
                         oracle: perp.oracle,
                         liqor: self.mango_account_address,
-                        liqor_owner: self.owner(),
+                        liqor_owner: self.authority(),
                         liqee: *liqee.0,
                         settle_bank: settle_token_info.first_bank(),
                         settle_vault: settle_token_info.first_vault(),
@@ -1797,13 +1863,13 @@ impl MangoClient {
         let mango_account = &self.mango_account().await?;
         let perp = self.context.perp(market_index);
         let settle_token_info = self.context.token(perp.settle_token_index);
-        let insurance_token_info = self.context.token(INSURANCE_TOKEN_INDEX);
+        let insurance_token_info = self.context.token_by_mint(&group.insurance_mint)?;
 
         let (health_remaining_ams, health_cu) = self
             .derive_health_check_remaining_account_metas_two_accounts(
                 mango_account,
                 liqee.1,
-                &[INSURANCE_TOKEN_INDEX],
+                &[insurance_token_info.token_index],
                 &[],
             )
             .await
@@ -1818,7 +1884,7 @@ impl MangoClient {
                         perp_market: perp.address,
                         oracle: perp.oracle,
                         liqor: self.mango_account_address,
-                        liqor_owner: self.owner(),
+                        liqor_owner: self.authority(),
                         liqee: *liqee.0,
                         settle_bank: settle_token_info.first_bank(),
                         settle_vault: settle_token_info.first_vault(),
@@ -1926,7 +1992,7 @@ impl MangoClient {
                         group: self.group(),
                         liqee: *liqee.0,
                         liqor: self.mango_account_address,
-                        liqor_owner: self.owner(),
+                        liqor_owner: self.authority(),
                     },
                     None,
                 );
@@ -1951,10 +2017,15 @@ impl MangoClient {
         liab_token_index: TokenIndex,
         max_liab_transfer: I80F48,
     ) -> anyhow::Result<PreparedInstructions> {
-        let mango_account = &self.mango_account().await?;
-        let quote_token_index = 0;
+        let group = account_fetcher_fetch_anchor_account::<Group>(
+            &*self.account_fetcher,
+            &self.context.group,
+        )
+        .await?;
 
-        let quote_info = self.context.token(quote_token_index);
+        let mango_account = &self.mango_account().await?;
+
+        let insurance_info = self.context.token_by_mint(&group.insurance_mint)?;
         let liab_info = self.context.token(liab_token_index);
 
         let bank_remaining_ams = liab_info
@@ -1967,17 +2038,11 @@ impl MangoClient {
             .derive_health_check_remaining_account_metas_two_accounts(
                 mango_account,
                 liqee.1,
-                &[INSURANCE_TOKEN_INDEX],
-                &[quote_token_index, liab_token_index],
+                &[insurance_info.token_index],
+                &[insurance_info.token_index, liab_token_index],
             )
             .await
             .unwrap();
-
-        let group = account_fetcher_fetch_anchor_account::<Group>(
-            &*self.account_fetcher,
-            &self.context.group,
-        )
-        .await?;
 
         let ix = Instruction {
             program_id: mango_v4::id(),
@@ -1987,9 +2052,9 @@ impl MangoClient {
                         group: self.group(),
                         liqee: *liqee.0,
                         liqor: self.mango_account_address,
-                        liqor_owner: self.owner(),
+                        liqor_owner: self.authority(),
                         liab_mint_info: liab_info.mint_info_address,
-                        quote_vault: quote_info.first_vault(),
+                        quote_vault: insurance_info.first_vault(),
                         insurance_vault: group.insurance_vault,
                         token_program: Token::id(),
                     },
@@ -2047,7 +2112,7 @@ impl MangoClient {
                         group: self.group(),
                         liqee: *liqee.0,
                         liqor: self.mango_account_address,
-                        liqor_authority: self.owner(),
+                        liqor_authority: self.authority(),
                     },
                     None,
                 );
@@ -2094,7 +2159,7 @@ impl MangoClient {
                         group: self.group(),
                         liqee: *account.0,
                         liqor: self.mango_account_address,
-                        liqor_authority: self.owner(),
+                        liqor_authority: self.authority(),
                     },
                     None,
                 );
@@ -2298,7 +2363,7 @@ impl MangoClient {
         self.context.compute_estimates.cu_per_mango_instruction + health_cu
     }
 
-    pub async fn send_and_confirm_owner_tx(
+    pub async fn send_and_confirm_authority_tx(
         &self,
         instructions: Vec<Instruction>,
     ) -> anyhow::Result<Signature> {
@@ -2306,7 +2371,7 @@ impl MangoClient {
             instructions,
             ..self.transaction_builder().await?
         };
-        tx_builder.signers.push(self.owner.clone());
+        tx_builder.signers.push(self.authority.clone());
         tx_builder.send_and_confirm(&self.client).await
     }
 

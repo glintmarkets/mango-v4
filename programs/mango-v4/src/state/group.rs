@@ -12,11 +12,6 @@ pub type TokenIndex = u16;
 /// incorrect assumption.
 pub const QUOTE_TOKEN_INDEX: TokenIndex = 0;
 
-/// The token index used for the insurance fund.
-///
-/// We should eventually generalize insurance funds.
-pub const INSURANCE_TOKEN_INDEX: TokenIndex = 0;
-
 /// The token index used for settling perp markets.
 ///
 /// We should eventually generalize to make the whole perp quote (and settle) token
@@ -152,10 +147,6 @@ impl Group {
     pub fn is_ix_enabled(&self, ix: IxGate) -> bool {
         self.ix_gate & (1 << ix as u128) == 0
     }
-
-    pub fn openbook_v2_supported(&self) -> bool {
-        self.is_testing()
-    }
 }
 
 /// Enum for lookup into ix gate
@@ -248,6 +239,8 @@ pub enum IxGate {
     TokenForceWithdraw = 72,
     SequenceCheck = 73,
     HealthCheck = 74,
+    OpenbookV2CancelAllOrders = 75,
+    GroupChangeInsuranceFund = 76,
     // NOTE: Adding new variants requires matching changes in ts and the ix_gate_set instruction.
 }
 

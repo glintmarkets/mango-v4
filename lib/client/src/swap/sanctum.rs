@@ -124,14 +124,14 @@ impl<'a> Sanctum<'a> {
             .map(util::to_writable_account_meta)
             .collect::<Vec<_>>();
 
-        let owner = self.mango_client.owner();
+        let authority = self.mango_client.authority();
         let account = &self.mango_client.mango_account().await?;
 
         let token_ams = [source_token.mint, target_token.mint]
             .into_iter()
             .map(|mint| {
                 util::to_writable_account_meta(
-                    anchor_spl::associated_token::get_associated_token_address(&owner, &mint),
+                    anchor_spl::associated_token::get_associated_token_address(&authority, &mint),
                 )
             })
             .collect::<Vec<_>>();
@@ -176,7 +176,7 @@ impl<'a> Sanctum<'a> {
                 input: input_mint.to_string(),
                 mode: "ExactIn".to_string(),
                 output_lst_mint: output_mint.to_string(),
-                signer: owner.to_string(),
+                signer: authority.to_string(),
                 swap_src: quote.swap_src.clone(),
             })
             .timeout(self.timeout_duration)
@@ -244,8 +244,8 @@ impl<'a> Sanctum<'a> {
         // Ensure the source token account is created (sanctum takes care of the output account)
         instructions.push(
             spl_associated_token_account::instruction::create_associated_token_account_idempotent(
-                &owner,
-                &owner,
+                &authority,
+                &authority,
                 &source_token.mint,
                 &Token::id(),
             ),
@@ -257,7 +257,7 @@ impl<'a> Sanctum<'a> {
                 let mut ams = anchor_lang::ToAccountMetas::to_account_metas(
                     &mango_v4::accounts::FlashLoanBegin {
                         account: self.mango_client.mango_account_address,
-                        owner,
+                        owner: authority,
                         token_program: Token::id(),
                         instructions: solana_sdk::sysvar::instructions::id(),
                     },
@@ -284,7 +284,7 @@ impl<'a> Sanctum<'a> {
                 let mut ams = anchor_lang::ToAccountMetas::to_account_metas(
                     &mango_v4::accounts::FlashLoanEnd {
                         account: self.mango_client.mango_account_address,
-                        owner,
+                        owner: authority,
                         token_program: Token::id(),
                     },
                     None,
@@ -308,13 +308,13 @@ impl<'a> Sanctum<'a> {
         let mut address_lookup_tables = self.mango_client.mango_address_lookup_tables().await?;
         address_lookup_tables.extend(sanctum_alts.into_iter());
 
-        let payer = owner; // maybe use fee_payer? but usually it's the same
+        let payer = authority; // maybe use fee_payer? but usually it's the same
 
         Ok(TransactionBuilder {
             instructions,
             address_lookup_tables,
             payer,
-            signers: vec![self.mango_client.owner.clone()],
+            signers: vec![self.mango_client.authority.clone()],
             config: self
                 .mango_client
                 .client
@@ -365,37 +365,42 @@ pub async fn load_supported_token_mints(
         }
     }
 
+    // taken from https://github.com/igneous-labs/sanctum-lst-list/blob/master/sanctum-lst-list.toml
+    let hardcoded_lst_mints = [
+        "pathdXw4He1Xk3eX84pDdDZnGKEme3GivBamGCVPZ5a", //  pathSOL
+        "jupSoLaHXQiZZTSfEWMTRRgpnyFm8f6sZdosWBjx93v", // JupSOL
+        "BgYgFYq4A9a2o5S1QbWkmYVFBh7LBQL8YvugdhieFg38", // juicingJupSOL
+        "pWrSoLAhue6jUxUkbWgmEy5rD9VJzkFmvfTDV5KgNuu", // pwrSOL
+        "suPer8CPwxoJPQ7zksGMwFvjBQhjAHwUMmPV4FVatBw", // superSOL
+        "jucy5XJ76pHVvtPZb5TKRcGQExkwit2P5s4vY8UzmpC", // jucySOL
+        "BonK1YhkXEGLZzwtcvRTip3gAL9nCeQD7ppZBLXhtTs", // bonkSOL
+        "Dso1bDeDjCQxTrWHqUUi63oBvV7Mdm6WaobLbQ7gnPQ", // dSOL
+        "Comp4ssDzXcLeu2MnLuGNNFC4cmLPMng8qWHPvzAMU1h", // compassSOL
+        "picobAEvs6w7QEknPce34wAE4gknZA9v5tTonnmHYdX", // picoSOL
+        "GRJQtWwdJmp5LLpy8JWjPgn5FnLyqSJGNhn5ZnCTFUwM", // clockSOL
+        "HUBsveNpjo5pWqNkH57QzxjQASdTVXcSK7bVKTSZtcSX", // hubSOL
+        "strng7mqqc1MBJJV6vMzYbEqnwVGvKKGKedeCvtktWA", // strongSOL
+        "LnTRntk2kTfWEY6cVB8K9649pgJbt6dJLS1Ns1GZCWg", // lanternSOL
+        "st8QujHLPsX3d6HG9uQg9kJ91jFxUgruwsb1hyYXSNd", // stakeSOL
+        "pumpkinsEq8xENVZE6QgTS93EN4r9iKvNxNALS1ooyp", // pumpkinSOL
+        "CgnTSoL3DgY9SFHxcLj6CgCgKKoTBr6tp4CPAEWy25DE", // cgntSOL
+        "LAinEtNLgpmCP9Rvsf5Hn8W6EhNiKLZQti1xfWMLy6X", // laineSOL
+        "vSoLxydx6akxyMD9XEcPvGYNGq6Nn66oqVb3UkGkei7", // vSOL
+        "bSo13r4TkiE4KumL71LsHTPpL2euBYLFx6h9HP3piy1", // bSOL
+        "GEJpt3Wjmr628FqXxTgxMce1pLntcPV4uFi8ksxMyPQh", // daoSOL
+        "J1toso1uCk3RLmjorhTtrVwY9HJ7X8V9yYac6Y7kGCPn", // JitoSOL
+        "7Q2afV64in6N6SeZsAAB81TJzwDoD6zpqmHkzi9Dcavn", // JSOL
+        "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", // LST
+        "Zippybh3S5xYYam2nvL6hVJKz1got6ShgV4DyD1XQYF", // zippySOL
+        "edge86g9cVz87xcpKpy3J77vbp4wYd9idEV562CCntt", // edgeSOL
+        "So11111111111111111111111111111111111111112", // SOL
+        "5oVNBeEEQvYi1cX3ir8Dx5n1P7pdxydbGF2X4TxVusJm", // INF
+        "7dHbWXmci3dT8UFYWYZweBLXgycu7Y3iL6trKn1Y7ARj", // stSOL
+        "mSoLzYCxHdYgdzU16g5QSh3i5K3z3KZK7ytfqcJm7So", // mSOL
+    ];
+
     // Hardcoded for now
-    lst_mints.insert(
-        Pubkey::from_str("CgntPoLka5pD5fesJYhGmUCF8KU1QS1ZmZiuAuMZr2az").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("7ge2xKsZXmqPxa3YmXxXmzCp9Hc2ezrTxh6PECaxCwrL").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("GUAMR8ciiaijraJeLDEDrFVaueLm9YzWWY9R7CBPL9rA").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("Jito4APyf642JPZPx3hGc6WWJ8zPKtRbRs4P815Awbb").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("CtMyWsrUtAwXWiGr9WjHT5fC3p3fgV8cyGpLTo2LJzG1").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("2qyEeSAWKfU18AFthrF7JA8z8ZCi1yt76Tqs917vwQTV").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("DqhH94PjkZsjAqEze2BEkWhFQJ6EyU6MdtMphMgnXqeK").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("F8h46pYkaqPJNP2MRkUUUtRkf8efCkpoqehn9g1bTTm7").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("5oc4nmbNTda9fx8Tw57ShLD132aqDK65vuHH4RU1K4LZ").expect("invalid lst mint"),
-    );
-    lst_mints.insert(
-        Pubkey::from_str("stk9ApL5HeVAwPLr3TLhDXdZS8ptVu7zp6ov8HFDuMi").expect("invalid lst mint"),
-    );
+    lst_mints.extend(hardcoded_lst_mints.map(|x| Pubkey::from_str(x).expect("invalid mint")));
 
     Ok(lst_mints)
 }

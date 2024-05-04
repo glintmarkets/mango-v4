@@ -4,7 +4,43 @@ Update this for each program release and mainnet deployment.
 
 ## not on mainnet
 
-### v0.23.0, 2024-3-
+### v0.25.0, 2024-4-
+
+- Openbook-v2 integration (#836) 
+
+- Remove delegate to owner withdrawal limitation (#939) 
+
+- Allows the insurance fund to be any bank (#946)
+
+## mainnet
+
+### v0.24.0, 2024-4-18
+
+Deployment: Apr 18, 2024 at 14:53:24 Central European Summer Time, https://explorer.solana.com/tx/2TFCGXQkUjRvkuuojxmiKefUtHPp6q6rM1frYvALByWMGfpWbiGH5hGq5suWEH7TUKoz4jb4KCGxu9DRw7YcXNdh
+
+- Allow skipping banks and invalid oracles when computing health (#891)
+
+  This is only possible when we know for sure that the operation would not put the account into negative health zone.
+
+- Add support for Raydium CLMM as oracle fallback (#856)
+
+- Add a `TokenBalanceLog` when charging collateral fees (#894)
+
+- Withdraw instruction: remove overflow error and return appropriate error message instead (#910)
+
+- Banks: add more safety checks (#895)
+
+- Add a health check instruction (#913)
+
+  Assert in a transaction that operation run on a mango account does not reduce it's health below a specified amount.
+
+- Add a sequence check instruction (#909)
+
+  Assert that a transaction was emitted and run with a correct view of the current mango state.
+
+### v0.23.0, 2024-3-8
+
+Deployment: Mar 8, 2024 at 12:10:52 Central European Standard Time, https://explorer.solana.com/tx/6MXGookZoYGMYb7tWrrmgZzVA13HJimHNqwHRVFeqL9YpQD7YasH1pQn4MSQTK1o13ixKTGFxwZsviUzmHzzP9m
 
 - Allow disabling asset liquidations for tokens (#867)
 
@@ -25,8 +61,6 @@ Update this for each program release and mainnet deployment.
 
 - Flash loan: Add a "swap without flash loan fees" option (#882)
 - Cleanup, tests and minor (#878, #875, #854, #838, #895)
-
-## mainnet
 
 ### v0.22.0, 2024-3-3
 

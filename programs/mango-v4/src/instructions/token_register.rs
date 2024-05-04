@@ -47,13 +47,6 @@ pub fn token_register(
     disable_asset_liquidation: bool,
     collateral_fee_per_day: f32,
 ) -> Result<()> {
-    // Require token 0 to be in the insurance token
-    if token_index == INSURANCE_TOKEN_INDEX {
-        require_keys_eq!(
-            ctx.accounts.group.load()?.insurance_mint,
-            ctx.accounts.mint.key()
-        );
-    }
     require_neq!(token_index, TokenIndex::MAX);
 
     let now_ts: u64 = Clock::get()?.unix_timestamp.try_into().unwrap();
@@ -121,6 +114,7 @@ pub fn token_register(
         interest_target_utilization,
         interest_curve_scaling: interest_curve_scaling.into(),
         potential_serum_tokens: 0,
+        potential_openbook_tokens: 0,
         maint_weight_shift_start: 0,
         maint_weight_shift_end: 0,
         maint_weight_shift_duration_inv: I80F48::ZERO,
@@ -133,7 +127,8 @@ pub fn token_register(
         collected_liquidation_fees: I80F48::ZERO,
         collected_collateral_fees: I80F48::ZERO,
         collateral_fee_per_day,
-        reserved: [0; 1900],
+        padding2: [0; 4],
+        reserved: [0; 1888],
     };
 
     let oracle_ref = &AccountInfoRef::borrow(ctx.accounts.oracle.as_ref())?;
