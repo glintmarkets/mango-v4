@@ -335,6 +335,7 @@ fn oracle_state_unchecked_inner<T: KeyedAccountReader>(
     let data = &oracle_info.data();
     let oracle_type = determine_oracle_type(oracle_info)?;
 
+
     Ok(match oracle_type {
         OracleType::Stub => {
             let stub = oracle_info.load::<StubOracle>()?;
@@ -432,6 +433,7 @@ fn oracle_state_unchecked_inner<T: KeyedAccountReader>(
                 oracle_type: OracleType::RaydiumCLMM,
             }
         }
+        OracleType::SwitchboardOnDemand => todo!
     })
 }
 
