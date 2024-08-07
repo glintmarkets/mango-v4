@@ -119,6 +119,7 @@ pub enum OracleType {
     OrcaCLMM,
     RaydiumCLMM,
     SwitchboardOnDemand,
+    PythV2,
 }
 
 impl OracleType {
@@ -447,7 +448,7 @@ fn oracle_state_unchecked_inner<T: KeyedAccountReader>(
                 oracle_type: OracleType::RaydiumCLMM,
             }
         }
-        OracleType::SwitchboardOnDemand => {
+        _ => {
             // We don't actually care about the resolution here, this is just to get the build to pass
             OracleState {
                 price: I80F48::ZERO,
