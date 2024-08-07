@@ -118,6 +118,7 @@ pub enum OracleType {
     SwitchboardV2,
     OrcaCLMM,
     RaydiumCLMM,
+    SwitchboardOnDemand,
 }
 
 pub struct OracleState {
