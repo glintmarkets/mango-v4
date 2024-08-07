@@ -433,7 +433,9 @@ fn oracle_state_unchecked_inner<T: KeyedAccountReader>(
                 oracle_type: OracleType::RaydiumCLMM,
             }
         }
-        OracleType::SwitchboardOnDemand => todo!
+        OracleType::SwitchboardOnDemand => {
+            todo!
+        }
     })
 }
 
