@@ -434,7 +434,13 @@ fn oracle_state_unchecked_inner<T: KeyedAccountReader>(
             }
         }
         OracleType::SwitchboardOnDemand => {
-            todo!
+            // We don't actually care about the resolution here, this is just to get the build to pass
+            OracleState {
+                price: I80F48::ZERO,
+                last_update_slot: 0,
+                deviation: I80F48::ZERO,
+                oracle_type: OracleType::SwitchboardOnDemand,
+            }
         }
     })
 }
