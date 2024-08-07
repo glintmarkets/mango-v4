@@ -121,6 +121,20 @@ pub enum OracleType {
     SwitchboardOnDemand,
 }
 
+impl OracleType {
+    pub fn variants() -> &'static [&'static str] {
+        &[
+            "Pyth",
+            "Stub",
+            "SwitchboardV1",
+            "SwitchboardV2",
+            "OrcaCLMM",
+            "RaydiumCLMM",
+            "SwitchboardOnDemand",
+        ]
+    }
+}
+
 pub struct OracleState {
     pub price: I80F48,
     pub deviation: I80F48,
