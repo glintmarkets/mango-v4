@@ -110,7 +110,7 @@ impl OracleConfigParams {
     }
 }
 
-#[derive(Display, Debug, Clone, Copy, PartialEq, AnchorSerialize, AnchorDeserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, AnchorSerialize, AnchorDeserialize)]
 pub enum OracleType {
     Pyth,
     Stub,
